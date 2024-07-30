@@ -1,0 +1,87 @@
+version: '2'
+services:
+  bridge:
+    image: rabbitmq:latest
+    volumes:
+      - $PWD/bridge:/var/lib/rabbitmq 
+    ports:
+      - "5672:5672"
+    container_name: bridge
+    
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "node_health_check"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    container_name: redis_server
+    image: redislabs/redisearch
+    restart: always
+    ports:
+      - "6379:6379"
+
+    environment:
+      - REDIS_PASSWORD=password
+      - REDIS_PORT=6379
+      - REDIS_DATABASES=16
+      - USERNAME=user
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: backend
+    restart: on-failure
+    ports:
+      - "5001:5001"
+    depends_on:
+      bridge:
+        condition: service_healthy
+
+  mongo:
+    build: ./mongo
+    restart: on-failure
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    ports:
+      - "27017:27017"
+
+  # logging:
+  #   build:
+  #     context: .
+  #     dockerfile: logging/Dockerfile
+  #   container_name: logging
+  #   ports:
+  #     - "8003:8003"
+
+  auth:
+    build:
+      context: .
+      dockerfile: auth/Dockerfile
+    container_name: auth
+    ports:
+      - "8001:8001"
+    
+  gateway:
+    build: ./gateway
+    ports:
+      - "8000:80"
+    depends_on:
+      - auth
+      - backend
+    restart: on-failure
+
+    
+  sink:
+    build: ./sink
+    depends_on:
+      bridge:
+        condition: service_healthy
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+      - SECRET_KEY=TODOMEMAMA
+      - ALGORITHM="HS256"
+      - MONGO_LOCAL_URI=mongodb://root:example@mongo:27017
